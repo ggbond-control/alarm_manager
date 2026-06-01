@@ -1,0 +1,6 @@
+alarm_aggregator_node:
+  ros__parameters:
+    gas_alarm_audio: "gasLeakage.wav"   # 检测到气体泄漏
+    image_alarm_audio: "bodyDetect.wav" # 检测到生命体征
+    save_pic_dir: "alarms"
+    min_interval_seconds: 2
