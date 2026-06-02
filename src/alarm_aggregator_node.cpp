@@ -1,7 +1,7 @@
-#include <sys/stat.h>
 #include <unistd.h>
 
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -14,7 +14,7 @@
 #include "diagnostic_msgs/msg/diagnostic_array.hpp"
 #include "diagnostic_msgs/msg/diagnostic_status.hpp"
 #include "monitor_interfaces/msg/alarm_event.hpp"
-#include "monitor_interfaces/msg/gas_leak_event.hpp"
+#include "monitor_interfaces/msg/gas_alarm_event.hpp"
 #include "monitor_interfaces/msg/thermal_camera_event.hpp"
 
 using namespace std::chrono_literals;
@@ -38,8 +38,8 @@ public:
         event_pub_ = create_publisher<monitor_interfaces::msg::AlarmEvent>("/monitor/alarm/event", 10);
         health_pub_ = create_publisher<diagnostic_msgs::msg::DiagnosticArray>("/monitor/alarm/health", 10);
 
-        gas_sub_ = create_subscription<monitor_interfaces::msg::GasLeakEvent>(
-            "/monitor/gas/http/leak_event", 10,
+        gas_sub_ = create_subscription<monitor_interfaces::msg::GasAlarmEvent>(
+            "/monitor/gas/serial/alarm_event", 10,
             std::bind(&AlarmAggregatorNode::on_gas_event, this, std::placeholders::_1));
 
         camera_sub_ = create_subscription<monitor_interfaces::msg::ThermalCameraEvent>(
@@ -47,9 +47,14 @@ public:
             std::bind(&AlarmAggregatorNode::on_camera_event, this, std::placeholders::_1));
 
         health_timer_ = create_wall_timer(5s, std::bind(&AlarmAggregatorNode::publish_health, this));
+        RCLCPP_INFO(get_logger(), "报警管理节点已启动：气体音频=%s 图像音频=%s 图片目录=%s 最小间隔=%d秒",
+                    gas_alarm_audio_.c_str(), image_alarm_audio_.c_str(), save_pic_dir_.c_str(), min_interval_seconds_);
     }
 
 private:
+    static constexpr const char *kLogRed = "\033[31m";
+    static constexpr const char *kLogReset = "\033[0m";
+
     static std::string resolve_audio_path(const std::string &pkg_share, const std::string &param_path)
     {
         std::filesystem::path p(param_path);
@@ -60,28 +65,37 @@ private:
         return (std::filesystem::path(pkg_share) / "audio" / p).string();
     }
 
-    static std::string resolve_save_dir(const std::string &pkg_share, const std::string &param_path)
+    std::string resolve_save_dir(const std::string &pkg_share, const std::string &param_path)
     {
         std::filesystem::path p(param_path);
         if (p.is_absolute())
         {
             return p.string();
         }
-        return (std::filesystem::path(pkg_share) / p).string();
-    }
 
-    void on_gas_event(const monitor_interfaces::msg::GasLeakEvent::SharedPtr msg)
-    {
-        if (!msg->leaking)
+        const std::filesystem::path share_path(pkg_share);
+        std::filesystem::path workspace_root;
+        for (auto it = share_path.begin(); it != share_path.end(); ++it)
         {
-            publish_alarm("gas", "gas_normalized", msg->detail, "", false, "");
-            return;
+            if (*it == "install")
+                break;
+            workspace_root /= *it;
         }
 
-        if (!allow_trigger("gas"))
-            return;
-        play_sound(gas_alarm_audio_);
-        publish_alarm("gas", "gas_leak", msg->detail, gas_alarm_audio_, false, "");
+        if (!workspace_root.empty() && std::filesystem::exists(workspace_root / "src" / "alarm_manager"))
+        {
+            return (workspace_root / "src" / "alarm_manager" / p).string();
+        }
+
+        RCLCPP_WARN(get_logger(), "无法从安装目录推导工作区源码路径，图片将保存到安装目录。");
+        return (share_path / p).string();
+    }
+
+    void on_gas_event(const monitor_interfaces::msg::GasAlarmEvent::SharedPtr msg)
+    {
+        if (msg->audible)
+            play_sound(gas_alarm_audio_);
+        publish_alarm("gas", "gas_" + msg->level, msg->detail, msg->audible ? gas_alarm_audio_ : "", false, "", false, "");
     }
 
     void on_camera_event(const monitor_interfaces::msg::ThermalCameraEvent::SharedPtr msg)
@@ -90,21 +104,44 @@ private:
             return;
 
         std::string event_type = "camera_alarm";
-        if (msg->command == 0x4993)
+        std::string detail = msg->raw_summary.empty() ? "检测到摄像机报警" : msg->raw_summary;
+        if (msg->command == 0x5212)
+        {
             event_type = "thermal_alarm";
-        else if (msg->command == 0x5212)
+            if (msg->raw_summary.empty())
+                detail = "检测到热成像测温报警";
+        }
+        else if (msg->command == 0x5211)
+        {
+            event_type = "thermal_diff_alarm";
+            if (msg->raw_summary.empty())
+                detail = "检测到热成像温差报警";
+        }
+        else if (msg->command == 0x4993)
+        {
             event_type = "camera_image_alarm";
+            if (msg->raw_summary.empty())
+                detail = "检测到摄像机智能报警";
+        }
 
         std::string image_path;
         bool image_saved = false;
-        if (msg->has_image && !msg->image_data.empty())
+        if (!msg->image_data.empty())
         {
-            image_path = save_image_from_buffer(msg->image_data);
+            image_path = save_image_from_buffer(msg->image_data, "visible");
             image_saved = !image_path.empty();
         }
 
+        std::string thermal_image_path;
+        bool thermal_image_saved = false;
+        if (!msg->thermal_image_data.empty())
+        {
+            thermal_image_path = save_image_from_buffer(msg->thermal_image_data, "thermal");
+            thermal_image_saved = !thermal_image_path.empty();
+        }
+
         play_sound(image_alarm_audio_);
-        publish_alarm("camera", event_type, msg->raw_summary, image_alarm_audio_, image_saved, image_path);
+        publish_alarm("camera", event_type, detail, image_alarm_audio_, image_saved, image_path, thermal_image_saved, thermal_image_path);
     }
 
     bool allow_trigger(const std::string &source)
@@ -129,7 +166,7 @@ private:
     {
         if (access(file_path.c_str(), F_OK) != 0)
         {
-            RCLCPP_WARN(get_logger(), "Audio file not found: %s", file_path.c_str());
+            RCLCPP_WARN(get_logger(), "未找到音频文件：%s", file_path.c_str());
             return;
         }
 
@@ -138,11 +175,15 @@ private:
         if (ret != 0)
         {
             cmd = "paplay \"" + file_path + "\" &";
-            (void)std::system(cmd.c_str());
+            ret = std::system(cmd.c_str());
+            if (ret != 0)
+            {
+                RCLCPP_WARN(get_logger(), "播放音频失败：%s", file_path.c_str());
+            }
         }
     }
 
-    std::string save_image_from_buffer(const std::vector<uint8_t> &data)
+    std::string save_image_from_buffer(const std::vector<uint8_t> &data, const std::string &prefix)
     {
         int offset = -1;
         for (size_t i = 0; i + 1 < data.size(); i++)
@@ -154,7 +195,10 @@ private:
             }
         }
         if (offset < 0)
+        {
+            RCLCPP_WARN(get_logger(), "摄像机报警数据中未找到 JPEG 起始标记，跳过保存图片。");
             return "";
+        }
 
         const auto now_time = std::chrono::system_clock::now();
         const auto t = std::chrono::system_clock::to_time_t(now_time);
@@ -162,11 +206,14 @@ private:
         localtime_r(&t, &tm_buf);
 
         std::ostringstream oss;
-        oss << save_pic_dir_ << "/img_" << std::put_time(&tm_buf, "%Y%m%d_%H%M%S") << ".jpg";
+        oss << save_pic_dir_ << "/" << prefix << "_" << std::put_time(&tm_buf, "%Y%m%d_%H%M%S") << ".jpg";
 
         std::ofstream out(oss.str(), std::ios::binary);
         if (!out.is_open())
+        {
+            RCLCPP_WARN(get_logger(), "无法写入报警图片：%s", oss.str().c_str());
             return "";
+        }
 
         out.write(reinterpret_cast<const char *>(data.data() + offset), static_cast<std::streamsize>(data.size() - offset));
         out.close();
@@ -174,7 +221,8 @@ private:
     }
 
     void publish_alarm(const std::string &source, const std::string &event_type, const std::string &detail,
-                       const std::string &audio_file, bool image_saved, const std::string &image_path)
+                       const std::string &audio_file, bool image_saved, const std::string &image_path,
+                       bool thermal_image_saved, const std::string &thermal_image_path)
     {
         monitor_interfaces::msg::AlarmEvent msg;
         msg.header.stamp = now();
@@ -185,7 +233,11 @@ private:
         msg.audio_file = audio_file;
         msg.image_saved = image_saved;
         msg.image_path = image_path;
+        msg.thermal_image_saved = thermal_image_saved;
+        msg.thermal_image_path = thermal_image_path;
         event_pub_->publish(msg);
+        RCLCPP_INFO(get_logger(), "%s已发布报警事件：来源=%s 类型=%s 详情=%s%s",
+                    kLogRed, source.c_str(), event_type.c_str(), detail.c_str(), kLogReset);
     }
 
     void publish_health()
@@ -196,7 +248,7 @@ private:
         diagnostic_msgs::msg::DiagnosticStatus status;
         status.level = diagnostic_msgs::msg::DiagnosticStatus::OK;
         status.name = "alarm_manager";
-        status.message = "running";
+        status.message = "运行中";
 
         arr.status.push_back(status);
         health_pub_->publish(arr);
@@ -212,7 +264,7 @@ private:
     rclcpp::Publisher<monitor_interfaces::msg::AlarmEvent>::SharedPtr event_pub_;
     rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr health_pub_;
 
-    rclcpp::Subscription<monitor_interfaces::msg::GasLeakEvent>::SharedPtr gas_sub_;
+    rclcpp::Subscription<monitor_interfaces::msg::GasAlarmEvent>::SharedPtr gas_sub_;
     rclcpp::Subscription<monitor_interfaces::msg::ThermalCameraEvent>::SharedPtr camera_sub_;
     rclcpp::TimerBase::SharedPtr health_timer_;
 };
