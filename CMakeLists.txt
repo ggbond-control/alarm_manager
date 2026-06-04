@@ -10,20 +10,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
-find_package(rclcpp_action REQUIRED)
 find_package(ament_index_cpp REQUIRED)
-find_package(std_msgs REQUIRED)
-find_package(diagnostic_msgs REQUIRED)
-find_package(monitor_interfaces REQUIRED)
+find_package(rcl_interfaces REQUIRED)
 
 add_executable(alarm_aggregator_node src/alarm_aggregator_node.cpp)
 ament_target_dependencies(alarm_aggregator_node
   rclcpp
-  rclcpp_action
   ament_index_cpp
-  std_msgs
-  diagnostic_msgs
-  monitor_interfaces
+  rcl_interfaces
 )
 
 install(TARGETS alarm_aggregator_node
