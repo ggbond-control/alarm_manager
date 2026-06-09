@@ -1,6 +1,8 @@
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <cstdlib>
 #include <filesystem>
 #include <signal.h>
@@ -31,6 +33,7 @@ public:
         play_ = declare_parameter<bool>("play", false);
 
         audio_base_dir_ = resolve_base_dir(audio_base_dir_);
+        playback_thread_ = std::thread([this]() { playback_loop(); });
         set_params_handle_ = add_on_set_parameters_callback(std::bind(&AlarmAggregatorNode::on_set_parameters, this, std::placeholders::_1));
 
         RCLCPP_INFO(get_logger(), "报警喇叭参数服务已就绪：/alarm_aggregator_node/set_parameters 音频目录=%s 分类={gas:%s,camera:%s}",
@@ -39,8 +42,15 @@ public:
 
     ~AlarmAggregatorNode() override
     {
-        std::lock_guard<std::mutex> lock(mutex_);
-        stop_players();
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            shutdown_requested_ = true;
+            clear_pending_locked();
+            stop_active_player_locked();
+        }
+        cv_.notify_all();
+        if (playback_thread_.joinable())
+            playback_thread_.join();
     }
 
 private:
@@ -117,19 +127,6 @@ private:
                 result.reason = "未找到报警音频文件：" + audio_path;
                 return result;
             }
-            stop_players();
-            if (!play_sound(audio_path, next_player_command, next_fallback_player_command))
-            {
-                result.successful = false;
-                result.reason = "播放报警音频失败：" + audio_path;
-                return result;
-            }
-            RCLCPP_INFO(get_logger(), "已播放报警音频：类别=%s 文件=%s", next_alarm_category.c_str(), audio_path.c_str());
-        }
-        else if (play_param_seen && !next_play)
-        {
-            stop_players();
-            RCLCPP_INFO(get_logger(), "已停止报警音频。");
         }
 
         audio_base_dir_ = next_audio_base_dir;
@@ -139,6 +136,19 @@ private:
         camera_audio_ = next_camera_audio;
         alarm_category_ = next_alarm_category;
         play_ = next_play;
+
+        if (play_param_seen && next_play)
+        {
+            enqueue_alarm_locked(next_alarm_category);
+            cv_.notify_all();
+        }
+        else if (play_param_seen && !next_play)
+        {
+            clear_pending_locked();
+            stop_active_player_locked();
+            cv_.notify_all();
+            RCLCPP_INFO(get_logger(), "已停止报警音频并清空待播队列。");
+        }
         return result;
     }
 
@@ -186,43 +196,114 @@ private:
         return "";
     }
 
-    bool play_sound(const std::string &file_path, const std::string &player_command, const std::string &fallback_player_command)
+    void enqueue_alarm_locked(const std::string &category)
     {
-        pid_t pid = launch_player(player_command, file_path, true);
-        if (pid > 0)
+        const auto duplicate = std::find(pending_categories_.begin(), pending_categories_.end(), category);
+        if (duplicate == pending_categories_.end())
         {
-            active_player_pid_ = pid;
-            return true;
+            pending_categories_.push_back(category);
+            RCLCPP_INFO(get_logger(), "报警音频请求已入队：类别=%s pending=%zu active=%s",
+                        category.c_str(), pending_categories_.size(),
+                        active_player_pid_ > 0 ? active_category_.c_str() : "none");
         }
-
-        pid = launch_player(fallback_player_command, file_path, false);
-        if (pid > 0)
+        else
         {
-            active_player_pid_ = pid;
-            return true;
+            RCLCPP_DEBUG(get_logger(), "报警音频请求已合并：类别=%s pending=%zu active=%s",
+                         category.c_str(), pending_categories_.size(),
+                         active_player_pid_ > 0 ? active_category_.c_str() : "none");
         }
-
-        return false;
     }
 
-    void stop_players()
+    void clear_pending_locked()
+    {
+        pending_categories_.clear();
+    }
+
+    void stop_active_player_locked()
     {
         if (active_player_pid_ <= 0)
             return;
 
         kill(active_player_pid_, SIGTERM);
-        for (int i = 0; i < 10; ++i)
-        {
-            if (waitpid(active_player_pid_, nullptr, WNOHANG) == active_player_pid_)
-            {
-                active_player_pid_ = -1;
-                return;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        }
-        kill(active_player_pid_, SIGKILL);
-        waitpid(active_player_pid_, nullptr, 0);
         active_player_pid_ = -1;
+        active_category_.clear();
+    }
+
+    pid_t start_player_for_alarm(const std::string &file_path, const std::string &player_command,
+                                 const std::string &fallback_player_command)
+    {
+        pid_t pid = launch_player(player_command, file_path, true);
+        if (pid > 0)
+            return pid;
+
+        return launch_player(fallback_player_command, file_path, false);
+    }
+
+    void playback_loop()
+    {
+        while (rclcpp::ok())
+        {
+            std::string category;
+            std::string audio_path;
+            std::string player_command;
+            std::string fallback_player_command;
+
+            {
+                std::unique_lock<std::mutex> lock(mutex_);
+                cv_.wait(lock, [this]() {
+                    return shutdown_requested_ || !pending_categories_.empty();
+                });
+
+                if (shutdown_requested_)
+                    return;
+
+                category = pending_categories_.front();
+                pending_categories_.erase(pending_categories_.begin());
+                audio_path = resolve_audio_for_category(category, audio_base_dir_, gas_audio_, camera_audio_);
+                player_command = player_command_;
+                fallback_player_command = fallback_player_command_;
+            }
+
+            if (audio_path.empty() || access(audio_path.c_str(), F_OK) != 0)
+            {
+                RCLCPP_WARN(get_logger(), "跳过报警音频：类别=%s 文件无效=%s",
+                            category.c_str(), audio_path.c_str());
+                continue;
+            }
+
+            const pid_t pid = start_player_for_alarm(audio_path, player_command, fallback_player_command);
+            if (pid <= 0)
+            {
+                RCLCPP_WARN(get_logger(), "播放报警音频失败：类别=%s 文件=%s", category.c_str(), audio_path.c_str());
+                continue;
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                if (shutdown_requested_)
+                {
+                    kill(pid, SIGTERM);
+                    waitpid(pid, nullptr, 0);
+                    return;
+                }
+                active_player_pid_ = pid;
+                active_category_ = category;
+                RCLCPP_INFO(get_logger(), "开始播放报警音频：类别=%s 文件=%s", category.c_str(), audio_path.c_str());
+            }
+
+            waitpid(pid, nullptr, 0);
+
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                if (active_player_pid_ == pid)
+                {
+                    active_player_pid_ = -1;
+                    active_category_.clear();
+                }
+                RCLCPP_INFO(get_logger(), "报警音频播放结束：类别=%s pending=%zu",
+                            category.c_str(), pending_categories_.size());
+            }
+        }
     }
 
     static pid_t launch_player(const std::string &player_command, const std::string &file_path, bool quiet_flag)
@@ -258,6 +339,8 @@ private:
     }
 
     std::mutex mutex_;
+    std::condition_variable cv_;
+    std::thread playback_thread_;
     std::string package_share_;
     std::string audio_base_dir_;
     std::string player_command_;
@@ -266,6 +349,9 @@ private:
     std::string camera_audio_;
     std::string alarm_category_;
     bool play_{false};
+    bool shutdown_requested_{false};
+    std::vector<std::string> pending_categories_;
+    std::string active_category_;
     pid_t active_player_pid_{-1};
     rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr set_params_handle_;
 };
