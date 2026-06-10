@@ -3,7 +3,7 @@ alarm_aggregator_node:
     audio_base_dir: "audio"
     player_command: "aplay"
     fallback_player_command: "paplay"
-    gas_audio: "gasLeakage.wav"
-    camera_audio: "bodyDetect.wav"
+    gas_audio: "gas_leak.wav"
+    camera_audio: "temperature_anomaly.wav"
     alarm_category: ""
     play: false

@@ -66,6 +66,7 @@ private:
         auto next_alarm_category = alarm_category_;
         auto next_play = play_;
         bool play_param_seen = false;
+        bool alarm_category_param_seen = false;
 
         rcl_interfaces::msg::SetParametersResult result;
         result.successful = true;
@@ -97,6 +98,7 @@ private:
                 else if (param.get_name() == "alarm_category")
                 {
                     next_alarm_category = param.as_string();
+                    alarm_category_param_seen = true;
                 }
                 else if (param.get_name() == "play")
                 {
@@ -112,7 +114,25 @@ private:
             }
         }
 
+        bool should_enqueue_alarm = false;
+        bool wait_for_alarm_category = false;
         if (play_param_seen && next_play)
+        {
+            if (!next_alarm_category.empty())
+            {
+                should_enqueue_alarm = true;
+            }
+            else
+            {
+                wait_for_alarm_category = true;
+            }
+        }
+        else if (alarm_category_param_seen && pending_play_without_category_ && next_play)
+        {
+            should_enqueue_alarm = true;
+        }
+
+        if (should_enqueue_alarm)
         {
             const std::string audio_path = resolve_audio_for_category(next_alarm_category, next_audio_base_dir, next_gas_audio, next_camera_audio);
             if (audio_path.empty())
@@ -137,18 +157,26 @@ private:
         alarm_category_ = next_alarm_category;
         play_ = next_play;
 
-        if (play_param_seen && next_play)
+        if (play_param_seen && !next_play)
         {
-            enqueue_alarm_locked(next_alarm_category);
-            cv_.notify_all();
-        }
-        else if (play_param_seen && !next_play)
-        {
+            pending_play_without_category_ = false;
             clear_pending_locked();
             stop_active_player_locked();
             cv_.notify_all();
             RCLCPP_INFO(get_logger(), "已停止报警音频并清空待播队列。");
         }
+        else if (should_enqueue_alarm)
+        {
+            pending_play_without_category_ = false;
+            enqueue_alarm_locked(next_alarm_category);
+            cv_.notify_all();
+        }
+        else if (wait_for_alarm_category)
+        {
+            pending_play_without_category_ = true;
+            RCLCPP_INFO(get_logger(), "收到播放请求，等待 alarm_category 参数后再播放。");
+        }
+
         return result;
     }
 
@@ -199,7 +227,7 @@ private:
     void enqueue_alarm_locked(const std::string &category)
     {
         const auto duplicate = std::find(pending_categories_.begin(), pending_categories_.end(), category);
-        if (duplicate == pending_categories_.end())
+        if (duplicate == pending_categories_.end() && active_category_ != category)
         {
             pending_categories_.push_back(category);
             RCLCPP_INFO(get_logger(), "报警音频请求已入队：类别=%s pending=%zu active=%s",
@@ -295,13 +323,26 @@ private:
 
             {
                 std::lock_guard<std::mutex> lock(mutex_);
-                if (active_player_pid_ == pid)
+                const bool completed_active_player = active_player_pid_ == pid;
+                if (completed_active_player)
                 {
                     active_player_pid_ = -1;
                     active_category_.clear();
                 }
-                RCLCPP_INFO(get_logger(), "报警音频播放结束：类别=%s pending=%zu",
-                            category.c_str(), pending_categories_.size());
+
+                if (completed_active_player && play_ && alarm_category_ == category)
+                {
+                    enqueue_alarm_locked(category);
+                    cv_.notify_all();
+                    RCLCPP_INFO(get_logger(), "报警音频播放结束并继续循环：类别=%s pending=%zu",
+                                category.c_str(), pending_categories_.size());
+                }
+                else
+                {
+                    RCLCPP_INFO(get_logger(), "报警音频播放结束：类别=%s pending=%zu play=%s current_category=%s",
+                                category.c_str(), pending_categories_.size(),
+                                play_ ? "true" : "false", alarm_category_.c_str());
+                }
             }
         }
     }
@@ -349,6 +390,7 @@ private:
     std::string camera_audio_;
     std::string alarm_category_;
     bool play_{false};
+    bool pending_play_without_category_{false};
     bool shutdown_requested_{false};
     std::vector<std::string> pending_categories_;
     std::string active_category_;
