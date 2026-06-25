@@ -132,6 +132,20 @@ private:
             should_enqueue_alarm = true;
         }
 
+        if (alarm_category_param_seen && play_ && !alarm_category_.empty() && alarm_category_ != next_alarm_category)
+        {
+            RCLCPP_INFO(get_logger(), "忽略不同类别报警切换请求：active=%s incoming=%s，等待 play=false 后允许切换。",
+                        alarm_category_.c_str(), next_alarm_category.c_str());
+            return result;
+        }
+
+        if (should_enqueue_alarm && play_ && !alarm_category_.empty() && alarm_category_ != next_alarm_category)
+        {
+            RCLCPP_INFO(get_logger(), "忽略不同类别报警播放请求：active=%s incoming=%s，等待 play=false 后允许切换。",
+                        alarm_category_.c_str(), next_alarm_category.c_str());
+            return result;
+        }
+
         if (should_enqueue_alarm)
         {
             const std::string audio_path = resolve_audio_for_category(next_alarm_category, next_audio_base_dir, next_gas_audio, next_camera_audio);
@@ -162,6 +176,7 @@ private:
             pending_play_without_category_ = false;
             clear_pending_locked();
             stop_active_player_locked();
+            alarm_category_.clear();
             cv_.notify_all();
             RCLCPP_INFO(get_logger(), "已停止报警音频并清空待播队列。");
         }
