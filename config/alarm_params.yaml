@@ -5,5 +5,6 @@ alarm_aggregator_node:
     fallback_player_command: "paplay"
     gas_audio: "gas_leak.wav"
     camera_audio: "temperature_anomaly.wav"
+    acoustic_audio: "bodyDetect.wav"
     alarm_category: ""
     play: false
