@@ -1,16 +1,16 @@
-# 报警扬声器
+# 扬声器
 
 ## 编译
 
 ```bash
-cd ~/Workspace/algor_ws
+cd ~/Workspace/task_ws
 colcon build --packages-select alarm_manager --symlink-install
 ```
 
 ## 启动
 
 ```bash
-source ~/Workspace/algor_ws/install/setup.zsh
+source ~/Workspace/task_ws/install/setup.zsh
 ros2 launch alarm_manager alarm_manager.launch.py
 ```
 
@@ -50,3 +50,21 @@ ros2 launch alarm_manager alarm_manager.launch.py
 | 名称                                    | 类型                               |
 | --------------------------------------- | ---------------------------------- |
 | `/alarm_aggregator_node/set_parameters` | `rcl_interfaces/srv/SetParameters` |
+
+## 排错
+
+```bash
+aplay -l
+**** PLAYBACK 硬體裝置清單 ****
+card 0: rockchipdp0 [rockchip-dp0], device 0: rockchip-dp0 spdif-hifi-0 [rockchip-dp0 spdif-hifi-0]
+  子设备: 1/1
+  子设备 #0: subdevice #0
+card 1: rockchiphdmi0 [rockchip-hdmi0], device 0: rockchip-hdmi0 i2s-hifi-0 [rockchip-hdmi0 i2s-hifi-0]
+  子设备: 1/1
+  子设备 #0: subdevice #0
+card 2: rockchipes8388 [rockchip-es8388], device 0: dailink-multicodecs ES8323 HiFi-0 [dailink-multicodecs ES8323 HiFi-0]
+  子设备: 1/1
+  子设备 #0: subdevice #0
+
+aplay -D plughw:CARD=rockchipes8388,DEV=0 ~/Workspace/task_ws/src/alarm_manager/audio/gas_leak.wav
+```

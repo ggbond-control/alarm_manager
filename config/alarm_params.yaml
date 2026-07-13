@@ -2,7 +2,9 @@ alarm_aggregator_node:
   ros__parameters:
     audio_base_dir: "audio"
     player_command: "aplay"
+    player_device: "plughw:CARD=rockchipes8388,DEV=0"
     fallback_player_command: "paplay"
+    fallback_player_device: ""
     gas_audio: "gas_leak.wav"
     camera_audio: "temperature_anomaly.wav"
     acoustic_audio: "bodyDetect.wav"
