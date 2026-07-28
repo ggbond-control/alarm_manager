@@ -5,8 +5,8 @@ alarm_aggregator_node:
     player_device: "plughw:CARD=rockchipes8388,DEV=0"
     fallback_player_command: "paplay"
     fallback_player_device: ""
-    gas_audio: "gas_leak.wav"
-    camera_audio: "temperature_anomaly.wav"
-    acoustic_audio: "bodyDetect.wav"
+    gas_audio: "gas.wav"
+    camera_audio: "temperature.wav"
+    acoustic_audio: "sound.wav"
     alarm_category: ""
     play: false
