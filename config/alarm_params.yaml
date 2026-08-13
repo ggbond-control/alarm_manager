@@ -8,5 +8,6 @@ alarm_aggregator_node:
     gas_audio: "gas.wav"
     camera_audio: "temperature.wav"
     acoustic_audio: "sound.wav"
+    play_count: 3
     alarm_category: ""
     play: false

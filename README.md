@@ -45,6 +45,9 @@ ros2 launch alarm_manager alarm_manager.launch.py
    ]}"
    ```
 
+每次从停止状态触发报警时，音频默认播放 3 遍。播放完成后保持静音，收到
+`play=false` 后才允许下一次报警播放。次数可通过 `play_count` 参数配置。
+
 ## 接口
 
 | 名称                                    | 类型                               |

@@ -32,16 +32,23 @@ public:
         gas_audio_ = declare_parameter<std::string>("gas_audio", "gasLeakage.wav");
         camera_audio_ = declare_parameter<std::string>("camera_audio", "bodyDetect.wav");
         acoustic_audio_ = declare_parameter<std::string>("acoustic_audio", "bodyDetect.wav");
+        play_count_ = declare_parameter<int>("play_count", 3);
         alarm_category_ = declare_parameter<std::string>("alarm_category", "");
         play_ = declare_parameter<bool>("play", false);
+
+        if (play_count_ < 1)
+        {
+            RCLCPP_WARN(get_logger(), "play_count=%d 无效，使用默认值 3。", play_count_);
+            play_count_ = 3;
+        }
 
         audio_base_dir_ = resolve_base_dir(audio_base_dir_);
         playback_thread_ = std::thread([this]()
                                        { playback_loop(); });
         set_params_handle_ = add_on_set_parameters_callback(std::bind(&AlarmAggregatorNode::on_set_parameters, this, std::placeholders::_1));
 
-        RCLCPP_INFO(get_logger(), "报警喇叭参数服务已就绪：/alarm_aggregator_node/set_parameters 音频目录=%s 分类={gas:%s,camera:%s,acoustic:%s}",
-                    audio_base_dir_.c_str(), gas_audio_.c_str(), camera_audio_.c_str(), acoustic_audio_.c_str());
+        RCLCPP_INFO(get_logger(), "报警喇叭参数服务已就绪：/alarm_aggregator_node/set_parameters 音频目录=%s 播放次数=%d 分类={gas:%s,camera:%s,acoustic:%s}",
+                    audio_base_dir_.c_str(), play_count_, gas_audio_.c_str(), camera_audio_.c_str(), acoustic_audio_.c_str());
     }
 
     ~AlarmAggregatorNode() override
@@ -70,6 +77,7 @@ private:
         auto next_gas_audio = gas_audio_;
         auto next_camera_audio = camera_audio_;
         auto next_acoustic_audio = acoustic_audio_;
+        auto next_play_count = play_count_;
         auto next_alarm_category = alarm_category_;
         auto next_play = play_;
         bool play_param_seen = false;
@@ -114,6 +122,10 @@ private:
                 {
                     next_acoustic_audio = param.as_string();
                 }
+                else if (param.get_name() == "play_count")
+                {
+                    next_play_count = param.as_int();
+                }
                 else if (param.get_name() == "alarm_category")
                 {
                     next_alarm_category = param.as_string();
@@ -131,6 +143,13 @@ private:
                 result.reason = "参数类型错误：" + param.get_name() + " " + ex.what();
                 return result;
             }
+        }
+
+        if (next_play_count < 1)
+        {
+            result.successful = false;
+            result.reason = "play_count 必须大于 0";
+            return result;
         }
 
         bool should_enqueue_alarm = false;
@@ -165,6 +184,12 @@ private:
             return result;
         }
 
+        if (should_enqueue_alarm && play_ && alarm_category_ == next_alarm_category)
+        {
+            RCLCPP_DEBUG(get_logger(), "忽略已锁存报警的重复播放请求：category=%s", next_alarm_category.c_str());
+            return result;
+        }
+
         if (should_enqueue_alarm)
         {
             const std::string audio_path = resolve_audio_for_category(next_alarm_category, next_audio_base_dir, next_gas_audio, next_camera_audio, next_acoustic_audio);
@@ -190,6 +215,7 @@ private:
         gas_audio_ = next_gas_audio;
         camera_audio_ = next_camera_audio;
         acoustic_audio_ = next_acoustic_audio;
+        play_count_ = next_play_count;
         alarm_category_ = next_alarm_category;
         play_ = next_play;
 
@@ -199,12 +225,14 @@ private:
             clear_pending_locked();
             stop_active_player_locked();
             alarm_category_.clear();
+            remaining_play_count_ = 0;
             cv_.notify_all();
             RCLCPP_INFO(get_logger(), "已停止报警音频并清空待播队列。");
         }
         else if (should_enqueue_alarm)
         {
             pending_play_without_category_ = false;
+            remaining_play_count_ = play_count_;
             enqueue_alarm_locked(next_alarm_category);
             cv_.notify_all();
         }
@@ -401,10 +429,19 @@ private:
 
                 if (completed_active_player && play_ && alarm_category_ == category)
                 {
-                    enqueue_alarm_locked(category);
-                    cv_.notify_all();
-                    RCLCPP_INFO(get_logger(), "报警音频播放结束并继续循环：类别=%s pending=%zu",
-                                category.c_str(), pending_categories_.size());
+                    --remaining_play_count_;
+                    if (remaining_play_count_ > 0)
+                    {
+                        enqueue_alarm_locked(category);
+                        cv_.notify_all();
+                        RCLCPP_INFO(get_logger(), "报警音频单次播放结束：类别=%s remaining=%d",
+                                    category.c_str(), remaining_play_count_);
+                    }
+                    else
+                    {
+                        RCLCPP_INFO(get_logger(), "报警音频已完成限定次数：类别=%s count=%d，等待 play=false 后重新布防。",
+                                    category.c_str(), play_count_);
+                    }
                 }
                 else
                 {
@@ -485,6 +522,8 @@ private:
     std::string gas_audio_;
     std::string camera_audio_;
     std::string acoustic_audio_;
+    int play_count_{3};
+    int remaining_play_count_{0};
     std::string alarm_category_;
     bool play_{false};
     bool pending_play_without_category_{false};
