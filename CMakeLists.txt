@@ -12,12 +12,14 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(rcl_interfaces REQUIRED)
+find_package(std_msgs REQUIRED)
 
 add_executable(alarm_aggregator_node src/alarm_aggregator_node.cpp)
 ament_target_dependencies(alarm_aggregator_node
   rclcpp
   ament_index_cpp
   rcl_interfaces
+  std_msgs
 )
 
 install(TARGETS alarm_aggregator_node

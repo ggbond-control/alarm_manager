@@ -16,6 +16,7 @@
 #include "ament_index_cpp/get_package_share_directory.hpp"
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "std_msgs/msg/empty.hpp"
 
 class AlarmAggregatorNode : public rclcpp::Node
 {
@@ -35,6 +36,8 @@ public:
         play_count_ = declare_parameter<int>("play_count", 3);
         alarm_category_ = declare_parameter<std::string>("alarm_category", "");
         play_ = declare_parameter<bool>("play", false);
+        playback_completed_pub_ = create_publisher<std_msgs::msg::Empty>(
+            "/alarm_aggregator/playback_completed", 10);
 
         if (play_count_ < 1)
         {
@@ -387,6 +390,7 @@ private:
                 continue;
             }
 
+            bool natural_playback_completed = false;
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 if (shutdown_requested_)
@@ -439,6 +443,7 @@ private:
                     }
                     else
                     {
+                        natural_playback_completed = true;
                         RCLCPP_INFO(get_logger(), "报警音频已完成限定次数：类别=%s count=%d，等待 play=false 后重新布防。",
                                     category.c_str(), play_count_);
                     }
@@ -450,6 +455,8 @@ private:
                                 play_ ? "true" : "false", alarm_category_.c_str());
                 }
             }
+            if (natural_playback_completed)
+                playback_completed_pub_->publish(std_msgs::msg::Empty{});
         }
     }
 
@@ -531,6 +538,7 @@ private:
     std::vector<std::string> pending_categories_;
     std::string active_category_;
     pid_t active_player_pid_{-1};
+    rclcpp::Publisher<std_msgs::msg::Empty>::SharedPtr playback_completed_pub_;
     rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr set_params_handle_;
 };
 
