@@ -38,7 +38,7 @@ def generate_launch_description():
             parameters=[gimbal_params, cam_params, {
                 'enable_gimbal': False,
                 'enable_thermal': True,
-                'enable_smoke': False,
+                'enable_smoke': True,
             }],
         ),
         Node(
