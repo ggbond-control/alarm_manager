@@ -1,5 +1,12 @@
 # 扬声器
 
+大气环境报警使用 `alarm_category: atmospheric`，音频参数为
+`atmospheric_audio`（默认 `atmospheric.wav`），播放次数沿用 `play_count`。
+音频由用户提供的 `atmospheric.mp3` 转换为单声道 24 kHz、16-bit PCM WAV，
+以兼容现有 `aplay` 播放器。文件随包安装，不依赖下载目录的绝对路径。
+任务中枢只对已开启检测且被接受的阈值报警请求播放；持续异常使用现有重复抑制机制。
+`/alarm_aggregator/playback_completed` 由任务中枢处理，复位音频并停止报警灯。
+
 ## 编译
 
 ```bash

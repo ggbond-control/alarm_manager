@@ -33,6 +33,7 @@ public:
         gas_audio_ = declare_parameter<std::string>("gas_audio", "gasLeakage.wav");
         camera_audio_ = declare_parameter<std::string>("camera_audio", "bodyDetect.wav");
         acoustic_audio_ = declare_parameter<std::string>("acoustic_audio", "bodyDetect.wav");
+        atmospheric_audio_ = declare_parameter<std::string>("atmospheric_audio", "atmospheric.wav");
         play_count_ = declare_parameter<int>("play_count", 3);
         alarm_category_ = declare_parameter<std::string>("alarm_category", "");
         play_ = declare_parameter<bool>("play", false);
@@ -50,8 +51,8 @@ public:
                                        { playback_loop(); });
         set_params_handle_ = add_on_set_parameters_callback(std::bind(&AlarmAggregatorNode::on_set_parameters, this, std::placeholders::_1));
 
-        RCLCPP_INFO(get_logger(), "报警喇叭参数服务已就绪：/alarm_aggregator_node/set_parameters 音频目录=%s 播放次数=%d 分类={gas:%s,camera:%s,acoustic:%s}",
-                    audio_base_dir_.c_str(), play_count_, gas_audio_.c_str(), camera_audio_.c_str(), acoustic_audio_.c_str());
+        RCLCPP_INFO(get_logger(), "报警喇叭参数服务已就绪：/alarm_aggregator_node/set_parameters 音频目录=%s 播放次数=%d 分类={gas:%s,camera:%s,acoustic:%s,atmospheric:%s}",
+                    audio_base_dir_.c_str(), play_count_, gas_audio_.c_str(), camera_audio_.c_str(), acoustic_audio_.c_str(), atmospheric_audio_.c_str());
     }
 
     ~AlarmAggregatorNode() override
@@ -80,6 +81,7 @@ private:
         auto next_gas_audio = gas_audio_;
         auto next_camera_audio = camera_audio_;
         auto next_acoustic_audio = acoustic_audio_;
+        auto next_atmospheric_audio = atmospheric_audio_;
         auto next_play_count = play_count_;
         auto next_alarm_category = alarm_category_;
         auto next_play = play_;
@@ -124,6 +126,10 @@ private:
                 else if (param.get_name() == "acoustic_audio")
                 {
                     next_acoustic_audio = param.as_string();
+                }
+                else if (param.get_name() == "atmospheric_audio")
+                {
+                    next_atmospheric_audio = param.as_string();
                 }
                 else if (param.get_name() == "play_count")
                 {
@@ -195,7 +201,7 @@ private:
 
         if (should_enqueue_alarm)
         {
-            const std::string audio_path = resolve_audio_for_category(next_alarm_category, next_audio_base_dir, next_gas_audio, next_camera_audio, next_acoustic_audio);
+            const std::string audio_path = resolve_audio_for_category(next_alarm_category, next_audio_base_dir, next_gas_audio, next_camera_audio, next_acoustic_audio, next_atmospheric_audio);
             if (audio_path.empty())
             {
                 result.successful = false;
@@ -218,6 +224,7 @@ private:
         gas_audio_ = next_gas_audio;
         camera_audio_ = next_camera_audio;
         acoustic_audio_ = next_acoustic_audio;
+        atmospheric_audio_ = next_atmospheric_audio;
         play_count_ = next_play_count;
         alarm_category_ = next_alarm_category;
         play_ = next_play;
@@ -284,7 +291,8 @@ private:
                                                   const std::string &base_dir,
                                                   const std::string &gas_audio,
                                                   const std::string &camera_audio,
-                                                  const std::string &acoustic_audio)
+                                                  const std::string &acoustic_audio,
+                                                  const std::string &atmospheric_audio)
     {
         if (category == "gas")
             return resolve_audio_path(base_dir, gas_audio);
@@ -292,6 +300,8 @@ private:
             return resolve_audio_path(base_dir, camera_audio);
         if (category == "acoustic")
             return resolve_audio_path(base_dir, acoustic_audio);
+        if (category == "atmospheric")
+            return resolve_audio_path(base_dir, atmospheric_audio);
         return "";
     }
 
@@ -362,7 +372,7 @@ private:
 
                 category = pending_categories_.front();
                 pending_categories_.erase(pending_categories_.begin());
-                audio_path = resolve_audio_for_category(category, audio_base_dir_, gas_audio_, camera_audio_, acoustic_audio_);
+                audio_path = resolve_audio_for_category(category, audio_base_dir_, gas_audio_, camera_audio_, acoustic_audio_, atmospheric_audio_);
                 player_command = player_command_;
                 player_device = player_device_;
                 fallback_player_command = fallback_player_command_;
@@ -529,6 +539,7 @@ private:
     std::string gas_audio_;
     std::string camera_audio_;
     std::string acoustic_audio_;
+    std::string atmospheric_audio_;
     int play_count_{3};
     int remaining_play_count_{0};
     std::string alarm_category_;

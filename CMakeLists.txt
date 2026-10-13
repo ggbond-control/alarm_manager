@@ -31,6 +31,11 @@ install(DIRECTORY audio config launch
 )
 
 if(BUILD_TESTING)
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME atmospheric_audio_test
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/atmospheric_audio_test.py
+      $<TARGET_FILE:alarm_aggregator_node> ${CMAKE_CURRENT_SOURCE_DIR}/audio/atmospheric.wav)
+  set_tests_properties(atmospheric_audio_test PROPERTIES TIMEOUT 45 RUN_SERIAL TRUE)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
 endif()
