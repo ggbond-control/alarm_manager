@@ -9,6 +9,7 @@ alarm_aggregator_node:
     camera_audio: "temperature.wav"
     acoustic_audio: "sound.wav"
     atmospheric_audio: "atmospheric.wav"
+    ultrahigh_audio: "ultrahigh.wav"
     play_count: 3
     alarm_category: ""
     play: false

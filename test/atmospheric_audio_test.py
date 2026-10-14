@@ -19,14 +19,15 @@ from rcl_interfaces.srv import SetParameters
 from std_msgs.msg import Empty
 
 
-class AtmosphericAudioTest(unittest.TestCase):
+class AlarmCategoryAudioTest(unittest.TestCase):
     def test_category_playback_duplicate_stop_and_replay(self):
         executable, audio_path = sys.argv[1:3]
+        category = sys.argv[3] if len(sys.argv) > 3 else "atmospheric"
         with wave.open(audio_path) as audio:
             self.assertEqual(audio.getsampwidth(), 2)
             self.assertEqual(audio.getnchannels(), 1)
             self.assertGreater(audio.getnframes(), 0)
-        with tempfile.TemporaryDirectory(prefix="atmospheric_audio_") as directory:
+        with tempfile.TemporaryDirectory(prefix=f"{category}_audio_") as directory:
             directory = Path(directory)
             plays = directory / "plays.txt"
             player = directory / "mock_player"
@@ -35,7 +36,7 @@ class AtmosphericAudioTest(unittest.TestCase):
                               'time.sleep(0.35)\n')
             player.chmod(0o755)
             rclpy.init()
-            node = rclpy.create_node("atmospheric_audio_test")
+            node = rclpy.create_node(f"{category}_audio_test")
             completions = []
             subscription = node.create_subscription(
                 Empty, "/alarm_aggregator/playback_completed", lambda msg: completions.append(msg), 10)
@@ -71,19 +72,19 @@ class AtmosphericAudioTest(unittest.TestCase):
                         self.assertTrue(condition())
 
                     self.assertTrue(all(r.successful for r in send(
-                        alarm_category="atmospheric", play=True)))
+                        alarm_category=category, play=True)))
                     # Repeated requests while latched must not enqueue another sequence.
                     self.assertTrue(all(r.successful for r in send(
-                        alarm_category="atmospheric", play=True)))
+                        alarm_category=category, play=True)))
                     spin_until(lambda: len(completions) == 1)
                     self.assertEqual(plays.read_text().splitlines(), [audio_path] * 3)
                     self.assertTrue(all(r.successful for r in send(play=False)))
                     self.assertTrue(all(r.successful for r in send(
-                        alarm_category="atmospheric", play=True)))
+                        alarm_category=category, play=True)))
                     spin_until(lambda: len(completions) == 2)
                     self.assertEqual(plays.read_text().splitlines(), [audio_path] * 6)
                     self.assertTrue(all(r.successful for r in send(play=False)))
-                    failed = send(atmospheric_audio="missing.wav", alarm_category="atmospheric", play=True)
+                    failed = send(**{f"{category}_audio": "missing.wav", "alarm_category": category, "play": True})
                     self.assertTrue(any(not r.successful for r in failed))
                     self.assertTrue(any("未找到报警音频文件" in r.reason for r in failed))
                     self.assertEqual(len(plays.read_text().splitlines()), 6)

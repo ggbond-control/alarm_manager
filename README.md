@@ -2,10 +2,31 @@
 
 大气环境报警使用 `alarm_category: atmospheric`，音频参数为
 `atmospheric_audio`（默认 `atmospheric.wav`），播放次数沿用 `play_count`。
-音频由用户提供的 `atmospheric.mp3` 转换为单声道 24 kHz、16-bit PCM WAV，
-以兼容现有 `aplay` 播放器。文件随包安装，不依赖下载目录的绝对路径。
+音频使用用户提供的 `atmospheric1014.wav`，格式为单声道 16 kHz、16-bit PCM WAV，
+兼容现有 `aplay` 播放器。文件随包安装，不依赖下载目录的绝对路径。
 任务中枢只对已开启检测且被接受的阈值报警请求播放；持续异常使用现有重复抑制机制。
 `/alarm_aggregator/playback_completed` 由任务中枢处理，复位音频并停止报警灯。
+
+超高频局部放电报警使用 `alarm_category: ultrahigh`，音频参数为
+`ultrahigh_audio`（默认 `ultrahigh.wav`）。包内音频来自用户提供的
+`检测到局部放电故障.wav`，为单声道 16 kHz、16-bit PCM WAV，时长约 2.22 秒。
+检测已启用且传感器 `alarm_level_valid=true`、`alarm_level=2`，并经任务中枢
+接受报警后播放，默认播放 3 遍。预警、通信异常和无效等级不会播放局放故障音频。
+持续异常沿用任务中枢重复抑制；播放结束不会将故障视为恢复。
+音频请求失败时保留平台告警与报警灯。音频随包安装，不依赖下载目录。
+
+手动验证局放音频：
+
+```bash
+ros2 service call /alarm_aggregator_node/set_parameters rcl_interfaces/srv/SetParameters \
+"{parameters: [
+    {name: 'alarm_category', value: {type: 4, string_value: 'ultrahigh'}},
+    {name: 'play', value: {type: 1, bool_value: true}}
+]}"
+```
+
+该指令仅验证音频播放，不启动检测、报警灯或平台事件上报。实际局放任务
+沿用 `/monitor/ultrahigh/status` 和平台事件 `alert.ultrahigh`。
 
 ## 编译
 
