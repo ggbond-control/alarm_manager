@@ -10,6 +10,7 @@ alarm_aggregator_node:
     acoustic_audio: "sound.wav"
     atmospheric_audio: "atmospheric.wav"
     ultrahigh_audio: "ultrahigh.wav"
+    visual_algorithm_audio: "visual_algorithm.wav"
     play_count: 3
     alarm_category: ""
     play: false

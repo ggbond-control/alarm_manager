@@ -5,7 +5,8 @@
 音频使用用户提供的 `atmospheric1014.wav`，格式为单声道 16 kHz、16-bit PCM WAV，
 兼容现有 `aplay` 播放器。文件随包安装，不依赖下载目录的绝对路径。
 任务中枢只对已开启检测且被接受的阈值报警请求播放；持续异常使用现有重复抑制机制。
-`/alarm_aggregator/playback_completed` 由任务中枢处理，复位音频并停止报警灯。
+全部待播类别结束后，音频节点自行复位，并发布
+`/alarm_aggregator/playback_completed`，由任务中枢停止报警灯。
 
 超高频局部放电报警使用 `alarm_category: ultrahigh`，音频参数为
 `ultrahigh_audio`（默认 `ultrahigh.wav`）。包内音频来自用户提供的
@@ -73,8 +74,10 @@ ros2 launch alarm_manager alarm_manager.launch.py
    ]}"
    ```
 
-每次从停止状态触发报警时，音频默认播放 3 遍。播放完成后保持静音，收到
-`play=false` 后才允许下一次报警播放。次数可通过 `play_count` 参数配置。
+每个类别默认播放 3 遍。播放期间同类别请求合并，不同类别排队，
+按单遍轮转播放；整个队列结束后自行复位，可接收下一次报警。
+`play=false` 仍会立即停止播放并清空所有待播类别。次数由 `play_count` 配置。
+参数服务按条目依次处理，调用时须先设置 `alarm_category`，再设置 `play=true`。
 
 ## 接口
 
@@ -99,3 +102,23 @@ card 2: rockchipes8388 [rockchip-es8388], device 0: dailink-multicodecs ES8323 H
 
 aplay -D plughw:CARD=rockchipes8388,DEV=0 ~/Workspace/task_ws/src/alarm_manager/audio/gas_leak.wav
 ```
+
+## 统一视觉算法报警
+
+类别 `visual_algorithm`，参数 `visual_algorithm_audio`，默认 `visual_algorithm.wav`。
+音频来自 `/home/zxb/下载/视觉算法检测.mp3`，已转换为单声道 16 kHz、
+16-bit PCM WAV（约 2.38 秒）并随包安装，不依赖下载目录。
+所有进入任务中枢公共算法结果入口、且 `existException` 为整数 `1` 的有效结果
+均适用；算法异常结果上报和报告格式保持现有接口。
+
+仅验证扬声器（默认三遍）：
+
+```bash
+ros2 service call /alarm_aggregator_node/set_parameters rcl_interfaces/srv/SetParameters \
+"{parameters: [
+  {name: 'alarm_category', value: {type: 4, string_value: 'visual_algorithm'}},
+  {name: 'play', value: {type: 1, bool_value: true}}
+]}"
+```
+
+该指令不发起算法检测，也不控制机器人运动或启动报警灯。

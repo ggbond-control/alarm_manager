@@ -88,6 +88,33 @@ class AlarmCategoryAudioTest(unittest.TestCase):
                     self.assertTrue(any(not r.successful for r in failed))
                     self.assertTrue(any("未找到报警音频文件" in r.reason for r in failed))
                     self.assertEqual(len(plays.read_text().splitlines()), 6)
+                    if category == "visual_algorithm":
+                        self.assertTrue(all(r.successful for r in send(
+                            visual_algorithm_audio=Path(audio_path).name)))
+                        # Mixed categories must each finish three plays, with one drain notification.
+                        start = len(plays.read_text().splitlines())
+                        for kind in ("atmospheric", "visual_algorithm", "ultrahigh", "visual_algorithm"):
+                            self.assertTrue(all(r.successful for r in send(alarm_category=kind, play=True)))
+                        spin_until(lambda: len(completions) == 3, timeout=8)
+                        mixed = plays.read_text().splitlines()[start:]
+                        self.assertEqual(len(mixed), 9)
+                        for kind in ("atmospheric", "visual_algorithm", "ultrahigh"):
+                            self.assertEqual(mixed.count(str(Path(audio_path).parent / f"{kind}.wav")), 3)
+                        # Self-reset accepts a new batch without a global play=false round trip.
+                        self.assertTrue(all(r.successful for r in send(
+                            alarm_category=category, play=True)))
+                        spin_until(lambda: len(completions) == 4)
+                        # Stop during launch also cancels queued categories.
+                        for kind in ("visual_algorithm", "ultrahigh"):
+                            send(alarm_category=kind, play=True)
+                        send(play=False)
+                        time.sleep(.5)
+                        stopped_count = len(plays.read_text().splitlines())
+                        until = time.monotonic() + 1
+                        while time.monotonic() < until:
+                            rclpy.spin_once(node, timeout_sec=.05)
+                        self.assertEqual(len(plays.read_text().splitlines()), stopped_count)
+                        self.assertEqual(len(completions), 4)
                 except BaseException:
                     log.flush()
                     print((directory / "node.log").read_text(), file=sys.stderr)

@@ -35,6 +35,7 @@ public:
         acoustic_audio_ = declare_parameter<std::string>("acoustic_audio", "bodyDetect.wav");
         atmospheric_audio_ = declare_parameter<std::string>("atmospheric_audio", "atmospheric.wav");
         ultrahigh_audio_ = declare_parameter<std::string>("ultrahigh_audio", "ultrahigh.wav");
+        visual_algorithm_audio_ = declare_parameter<std::string>("visual_algorithm_audio", "visual_algorithm.wav");
         play_count_ = declare_parameter<int>("play_count", 3);
         alarm_category_ = declare_parameter<std::string>("alarm_category", "");
         play_ = declare_parameter<bool>("play", false);
@@ -84,6 +85,7 @@ private:
         auto next_acoustic_audio = acoustic_audio_;
         auto next_atmospheric_audio = atmospheric_audio_;
         auto next_ultrahigh_audio = ultrahigh_audio_;
+        auto next_visual_algorithm_audio = visual_algorithm_audio_;
         auto next_play_count = play_count_;
         auto next_alarm_category = alarm_category_;
         auto next_play = play_;
@@ -137,6 +139,10 @@ private:
                 {
                     next_ultrahigh_audio = param.as_string();
                 }
+                else if (param.get_name() == "visual_algorithm_audio")
+                {
+                    next_visual_algorithm_audio = param.as_string();
+                }
                 else if (param.get_name() == "play_count")
                 {
                     next_play_count = param.as_int();
@@ -185,29 +191,15 @@ private:
             should_enqueue_alarm = true;
         }
 
-        if (alarm_category_param_seen && play_ && !alarm_category_.empty() && alarm_category_ != next_alarm_category)
+        if (should_enqueue_alarm && remaining_by_category_.count(next_alarm_category))
         {
-            RCLCPP_INFO(get_logger(), "忽略不同类别报警切换请求：active=%s incoming=%s，等待 play=false 后允许切换。",
-                        alarm_category_.c_str(), next_alarm_category.c_str());
-            return result;
-        }
-
-        if (should_enqueue_alarm && play_ && !alarm_category_.empty() && alarm_category_ != next_alarm_category)
-        {
-            RCLCPP_INFO(get_logger(), "忽略不同类别报警播放请求：active=%s incoming=%s，等待 play=false 后允许切换。",
-                        alarm_category_.c_str(), next_alarm_category.c_str());
-            return result;
-        }
-
-        if (should_enqueue_alarm && play_ && alarm_category_ == next_alarm_category)
-        {
-            RCLCPP_DEBUG(get_logger(), "忽略已锁存报警的重复播放请求：category=%s", next_alarm_category.c_str());
+            // Merge repeated requests while this category is queued or playing.
             return result;
         }
 
         if (should_enqueue_alarm)
         {
-            const std::string audio_path = resolve_audio_for_category(next_alarm_category, next_audio_base_dir, next_gas_audio, next_camera_audio, next_acoustic_audio, next_atmospheric_audio, next_ultrahigh_audio);
+            const std::string audio_path = resolve_audio_for_category(next_alarm_category, next_audio_base_dir, next_gas_audio, next_camera_audio, next_acoustic_audio, next_atmospheric_audio, next_ultrahigh_audio, next_visual_algorithm_audio);
             if (audio_path.empty())
             {
                 result.successful = false;
@@ -232,6 +224,7 @@ private:
         acoustic_audio_ = next_acoustic_audio;
         atmospheric_audio_ = next_atmospheric_audio;
         ultrahigh_audio_ = next_ultrahigh_audio;
+        visual_algorithm_audio_ = next_visual_algorithm_audio;
         play_count_ = next_play_count;
         alarm_category_ = next_alarm_category;
         play_ = next_play;
@@ -242,14 +235,15 @@ private:
             clear_pending_locked();
             stop_active_player_locked();
             alarm_category_.clear();
-            remaining_play_count_ = 0;
+            remaining_by_category_.clear();
+            ++playback_generation_;
             cv_.notify_all();
             RCLCPP_INFO(get_logger(), "已停止报警音频并清空待播队列。");
         }
         else if (should_enqueue_alarm)
         {
             pending_play_without_category_ = false;
-            remaining_play_count_ = play_count_;
+            remaining_by_category_[next_alarm_category] = play_count_;
             enqueue_alarm_locked(next_alarm_category);
             cv_.notify_all();
         }
@@ -300,7 +294,8 @@ private:
                                                   const std::string &camera_audio,
                                                   const std::string &acoustic_audio,
                                                   const std::string &atmospheric_audio,
-                                                  const std::string &ultrahigh_audio)
+                                                  const std::string &ultrahigh_audio,
+                                                  const std::string &visual_algorithm_audio)
     {
         if (category == "gas")
             return resolve_audio_path(base_dir, gas_audio);
@@ -312,6 +307,8 @@ private:
             return resolve_audio_path(base_dir, atmospheric_audio);
         if (category == "ultrahigh")
             return resolve_audio_path(base_dir, ultrahigh_audio);
+        if (category == "visual_algorithm")
+            return resolve_audio_path(base_dir, visual_algorithm_audio);
         return "";
     }
 
@@ -366,6 +363,7 @@ private:
         while (rclcpp::ok())
         {
             std::string category;
+            uint64_t generation = 0;
             std::string audio_path;
             std::string player_command;
             std::string player_device;
@@ -380,56 +378,44 @@ private:
                 if (shutdown_requested_)
                     return;
 
+                generation = playback_generation_;
                 category = pending_categories_.front();
                 pending_categories_.erase(pending_categories_.begin());
-                audio_path = resolve_audio_for_category(category, audio_base_dir_, gas_audio_, camera_audio_, acoustic_audio_, atmospheric_audio_, ultrahigh_audio_);
+                audio_path = resolve_audio_for_category(category, audio_base_dir_, gas_audio_, camera_audio_, acoustic_audio_, atmospheric_audio_, ultrahigh_audio_, visual_algorithm_audio_);
                 player_command = player_command_;
                 player_device = player_device_;
                 fallback_player_command = fallback_player_command_;
                 fallback_player_device = fallback_player_device_;
             }
 
-            if (audio_path.empty() || access(audio_path.c_str(), F_OK) != 0)
-            {
-                RCLCPP_WARN(get_logger(), "跳过报警音频：类别=%s 文件无效=%s",
-                            category.c_str(), audio_path.c_str());
-                continue;
-            }
-
-            const pid_t pid = start_player_for_alarm(audio_path, player_command, player_device,
-                                                     fallback_player_command, fallback_player_device);
-            if (pid <= 0)
-            {
-                RCLCPP_WARN(get_logger(), "播放报警音频失败：类别=%s 文件=%s 主播放器=%s 设备=%s 备用播放器=%s 备用设备=%s",
-                            category.c_str(),
-                            audio_path.c_str(),
-                            player_command.c_str(),
-                            player_device.c_str(),
-                            fallback_player_command.c_str(),
-                            fallback_player_device.c_str());
-                continue;
-            }
-
-            bool natural_playback_completed = false;
+            pid_t pid = -1;
+            if (!audio_path.empty() && access(audio_path.c_str(), F_OK) == 0)
+                pid = start_player_for_alarm(audio_path, player_command, player_device,
+                                             fallback_player_command, fallback_player_device);
             {
                 std::lock_guard<std::mutex> lock(mutex_);
-                if (shutdown_requested_)
+                if (shutdown_requested_ || generation != playback_generation_)
                 {
-                    kill(pid, SIGTERM);
-                    waitpid(pid, nullptr, 0);
-                    return;
+                    if (pid > 0)
+                    {
+                        kill(pid, SIGTERM);
+                        waitpid(pid, nullptr, 0);
+                    }
+                    if (shutdown_requested_) return;
+                    continue;
                 }
                 active_player_pid_ = pid;
                 active_category_ = category;
-                RCLCPP_INFO(get_logger(), "开始播放报警音频：类别=%s 文件=%s 播放器=%s 设备=%s",
-                            category.c_str(),
-                            audio_path.c_str(),
-                            player_command.c_str(),
-                            player_device.c_str());
+                if (pid > 0)
+                    RCLCPP_INFO(get_logger(), "开始播放报警音频：类别=%s 文件=%s",
+                                category.c_str(), audio_path.c_str());
+                else
+                    RCLCPP_WARN(get_logger(), "播放报警音频失败：类别=%s 文件=%s",
+                                category.c_str(), audio_path.c_str());
             }
 
             int status = 0;
-            waitpid(pid, &status, 0);
+            if (pid > 0) waitpid(pid, &status, 0);
 
             if (WIFEXITED(status) && WEXITSTATUS(status) != 0)
             {
@@ -451,32 +437,27 @@ private:
                     active_category_.clear();
                 }
 
-                if (completed_active_player && play_ && alarm_category_ == category)
+                if (completed_active_player && play_ && generation == playback_generation_)
                 {
-                    --remaining_play_count_;
-                    if (remaining_play_count_ > 0)
+                    auto remaining = remaining_by_category_.find(category);
+                    if (remaining != remaining_by_category_.end() && --remaining->second > 0)
                     {
                         enqueue_alarm_locked(category);
                         cv_.notify_all();
-                        RCLCPP_INFO(get_logger(), "报警音频单次播放结束：类别=%s remaining=%d",
-                                    category.c_str(), remaining_play_count_);
                     }
-                    else
+                    else if (remaining != remaining_by_category_.end())
                     {
-                        natural_playback_completed = true;
-                        RCLCPP_INFO(get_logger(), "报警音频已完成限定次数：类别=%s count=%d，等待 play=false 后重新布防。",
-                                    category.c_str(), play_count_);
+                        remaining_by_category_.erase(remaining);
                     }
-                }
-                else
-                {
-                    RCLCPP_INFO(get_logger(), "报警音频播放结束：类别=%s pending=%zu play=%s current_category=%s",
-                                category.c_str(), pending_categories_.size(),
-                                play_ ? "true" : "false", alarm_category_.c_str());
+                    if (remaining_by_category_.empty())
+                    {
+                        // Reset locally: a delayed completion subscriber must never stop a newer batch.
+                        play_ = false;
+                        alarm_category_.clear();
+                        playback_completed_pub_->publish(std_msgs::msg::Empty{});
+                    }
                 }
             }
-            if (natural_playback_completed)
-                playback_completed_pub_->publish(std_msgs::msg::Empty{});
         }
     }
 
@@ -551,8 +532,10 @@ private:
     std::string acoustic_audio_;
     std::string atmospheric_audio_;
     std::string ultrahigh_audio_;
+    std::string visual_algorithm_audio_;
     int play_count_{3};
-    int remaining_play_count_{0};
+    std::map<std::string, int> remaining_by_category_;
+    uint64_t playback_generation_{0};
     std::string alarm_category_;
     bool play_{false};
     bool pending_play_without_category_{false};
