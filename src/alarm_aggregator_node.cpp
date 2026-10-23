@@ -303,7 +303,7 @@ private:
             return resolve_audio_path(base_dir, camera_audio);
         if (category == "acoustic")
             return resolve_audio_path(base_dir, acoustic_audio);
-        if (category == "atmospheric")
+        if (category == "atmospheric" || category == "smoke")
             return resolve_audio_path(base_dir, atmospheric_audio);
         if (category == "ultrahigh")
             return resolve_audio_path(base_dir, ultrahigh_audio);

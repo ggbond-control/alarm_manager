@@ -8,6 +8,10 @@
 全部待播类别结束后，音频节点自行复位，并发布
 `/alarm_aggregator/playback_completed`，由任务中枢停止报警灯。
 
+云台烟雾报警使用 `alarm_category: smoke`，共用 `atmospheric_audio`，默认播放
+`atmospheric.wav` 3 遍，不新增音频配置项。`smoke` 与 `atmospheric` 独立排队，
+两类同时报警时各播放一组；同一类别在排队或播放期间的重复请求会合并。
+
 超高频局部放电报警使用 `alarm_category: ultrahigh`，音频参数为
 `ultrahigh_audio`（默认 `ultrahigh.wav`）。包内音频来自用户提供的
 `检测到局部放电故障.wav`，为单声道 16 kHz、16-bit PCM WAV，时长约 2.22 秒。

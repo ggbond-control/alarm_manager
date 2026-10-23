@@ -84,10 +84,20 @@ class AlarmCategoryAudioTest(unittest.TestCase):
                     spin_until(lambda: len(completions) == 2)
                     self.assertEqual(plays.read_text().splitlines(), [audio_path] * 6)
                     self.assertTrue(all(r.successful for r in send(play=False)))
-                    failed = send(**{f"{category}_audio": "missing.wav", "alarm_category": category, "play": True})
+                    audio_parameter = "atmospheric_audio" if category == "smoke" else f"{category}_audio"
+                    failed = send(**{audio_parameter: "missing.wav", "alarm_category": category, "play": True})
                     self.assertTrue(any(not r.successful for r in failed))
                     self.assertTrue(any("未找到报警音频文件" in r.reason for r in failed))
                     self.assertEqual(len(plays.read_text().splitlines()), 6)
+                    if category == "smoke":
+                        self.assertTrue(all(r.successful for r in send(
+                            atmospheric_audio=Path(audio_path).name)))
+                        # Shared audio still represents two independently queued sources.
+                        for kind in ("smoke", "atmospheric", "smoke"):
+                            self.assertTrue(all(r.successful for r in send(
+                                alarm_category=kind, play=True)))
+                        spin_until(lambda: len(completions) == 3, timeout=8)
+                        self.assertEqual(plays.read_text().splitlines(), [audio_path] * 12)
                     if category == "visual_algorithm":
                         self.assertTrue(all(r.successful for r in send(
                             visual_algorithm_audio=Path(audio_path).name)))
