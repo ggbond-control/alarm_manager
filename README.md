@@ -112,8 +112,10 @@ aplay -D plughw:CARD=rockchipes8388,DEV=0 ~/Workspace/task_ws/src/alarm_manager/
 类别 `visual_algorithm`，参数 `visual_algorithm_audio`，默认 `visual_algorithm.wav`。
 音频来自 `/home/zxb/下载/视觉算法检测.mp3`，已转换为单声道 16 kHz、
 16-bit PCM WAV（约 2.38 秒）并随包安装，不依赖下载目录。
-所有进入任务中枢公共算法结果入口、且 `existException` 为整数 `1` 的有效结果
-均适用；算法异常结果上报和报告格式保持现有接口。
+任务中枢对 `existException` 为整数 `1` 的有效算法结果按编码选择报警音频。
+`helmet_detection` 和 `object_detection` 使用 `helmet_detection` 类别，`leak_client`
+使用 `leak_detection` 类别，其余算法使用 `visual_algorithm` 类别。音频可通过对应的
+`helmet_detection_audio`、`leak_detection_audio` 和 `visual_algorithm_audio` 参数设置。
 
 仅验证扬声器（默认三遍）：
 

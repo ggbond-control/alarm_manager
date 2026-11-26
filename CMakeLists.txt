@@ -41,6 +41,12 @@ if(BUILD_TESTING)
   add_test(NAME visual_algorithm_audio_test
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/atmospheric_audio_test.py
       $<TARGET_FILE:alarm_aggregator_node> ${CMAKE_CURRENT_SOURCE_DIR}/audio/visual_algorithm.wav visual_algorithm)
+  foreach(category IN ITEMS helmet_detection leak_detection)
+    add_test(NAME ${category}_audio_test
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/atmospheric_audio_test.py
+        $<TARGET_FILE:alarm_aggregator_node> ${CMAKE_CURRENT_SOURCE_DIR}/audio/${category}.wav ${category})
+    set_tests_properties(${category}_audio_test PROPERTIES TIMEOUT 45 RUN_SERIAL TRUE)
+  endforeach()
   add_test(NAME smoke_audio_test
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/atmospheric_audio_test.py
       $<TARGET_FILE:alarm_aggregator_node> ${CMAKE_CURRENT_SOURCE_DIR}/audio/atmospheric.wav smoke)

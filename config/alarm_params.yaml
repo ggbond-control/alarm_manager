@@ -11,6 +11,8 @@ alarm_aggregator_node:
     atmospheric_audio: "atmospheric.wav"
     ultrahigh_audio: "ultrahigh.wav"
     visual_algorithm_audio: "visual_algorithm.wav"
+    helmet_detection_audio: "helmet_detection.wav"
+    leak_detection_audio: "leak_detection.wav"
     play_count: 3
     alarm_category: ""
     play: false

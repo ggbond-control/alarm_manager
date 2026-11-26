@@ -36,6 +36,8 @@ public:
         atmospheric_audio_ = declare_parameter<std::string>("atmospheric_audio", "atmospheric.wav");
         ultrahigh_audio_ = declare_parameter<std::string>("ultrahigh_audio", "ultrahigh.wav");
         visual_algorithm_audio_ = declare_parameter<std::string>("visual_algorithm_audio", "visual_algorithm.wav");
+        helmet_detection_audio_ = declare_parameter<std::string>("helmet_detection_audio", "helmet_detection.wav");
+        leak_detection_audio_ = declare_parameter<std::string>("leak_detection_audio", "leak_detection.wav");
         play_count_ = declare_parameter<int>("play_count", 3);
         alarm_category_ = declare_parameter<std::string>("alarm_category", "");
         play_ = declare_parameter<bool>("play", false);
@@ -86,6 +88,8 @@ private:
         auto next_atmospheric_audio = atmospheric_audio_;
         auto next_ultrahigh_audio = ultrahigh_audio_;
         auto next_visual_algorithm_audio = visual_algorithm_audio_;
+        auto next_helmet_detection_audio = helmet_detection_audio_;
+        auto next_leak_detection_audio = leak_detection_audio_;
         auto next_play_count = play_count_;
         auto next_alarm_category = alarm_category_;
         auto next_play = play_;
@@ -143,6 +147,14 @@ private:
                 {
                     next_visual_algorithm_audio = param.as_string();
                 }
+                else if (param.get_name() == "helmet_detection_audio")
+                {
+                    next_helmet_detection_audio = param.as_string();
+                }
+                else if (param.get_name() == "leak_detection_audio")
+                {
+                    next_leak_detection_audio = param.as_string();
+                }
                 else if (param.get_name() == "play_count")
                 {
                     next_play_count = param.as_int();
@@ -199,7 +211,10 @@ private:
 
         if (should_enqueue_alarm)
         {
-            const std::string audio_path = resolve_audio_for_category(next_alarm_category, next_audio_base_dir, next_gas_audio, next_camera_audio, next_acoustic_audio, next_atmospheric_audio, next_ultrahigh_audio, next_visual_algorithm_audio);
+            const std::string audio_path = resolve_audio_for_category(
+                next_alarm_category, next_audio_base_dir, next_gas_audio, next_camera_audio,
+                next_acoustic_audio, next_atmospheric_audio, next_ultrahigh_audio,
+                next_visual_algorithm_audio, next_helmet_detection_audio, next_leak_detection_audio);
             if (audio_path.empty())
             {
                 result.successful = false;
@@ -225,6 +240,8 @@ private:
         atmospheric_audio_ = next_atmospheric_audio;
         ultrahigh_audio_ = next_ultrahigh_audio;
         visual_algorithm_audio_ = next_visual_algorithm_audio;
+        helmet_detection_audio_ = next_helmet_detection_audio;
+        leak_detection_audio_ = next_leak_detection_audio;
         play_count_ = next_play_count;
         alarm_category_ = next_alarm_category;
         play_ = next_play;
@@ -295,7 +312,9 @@ private:
                                                   const std::string &acoustic_audio,
                                                   const std::string &atmospheric_audio,
                                                   const std::string &ultrahigh_audio,
-                                                  const std::string &visual_algorithm_audio)
+                                                  const std::string &visual_algorithm_audio,
+                                                  const std::string &helmet_detection_audio,
+                                                  const std::string &leak_detection_audio)
     {
         if (category == "gas")
             return resolve_audio_path(base_dir, gas_audio);
@@ -309,6 +328,10 @@ private:
             return resolve_audio_path(base_dir, ultrahigh_audio);
         if (category == "visual_algorithm")
             return resolve_audio_path(base_dir, visual_algorithm_audio);
+        if (category == "helmet_detection")
+            return resolve_audio_path(base_dir, helmet_detection_audio);
+        if (category == "leak_detection")
+            return resolve_audio_path(base_dir, leak_detection_audio);
         return "";
     }
 
@@ -381,7 +404,10 @@ private:
                 generation = playback_generation_;
                 category = pending_categories_.front();
                 pending_categories_.erase(pending_categories_.begin());
-                audio_path = resolve_audio_for_category(category, audio_base_dir_, gas_audio_, camera_audio_, acoustic_audio_, atmospheric_audio_, ultrahigh_audio_, visual_algorithm_audio_);
+                audio_path = resolve_audio_for_category(
+                    category, audio_base_dir_, gas_audio_, camera_audio_, acoustic_audio_,
+                    atmospheric_audio_, ultrahigh_audio_, visual_algorithm_audio_,
+                    helmet_detection_audio_, leak_detection_audio_);
                 player_command = player_command_;
                 player_device = player_device_;
                 fallback_player_command = fallback_player_command_;
@@ -533,6 +559,8 @@ private:
     std::string atmospheric_audio_;
     std::string ultrahigh_audio_;
     std::string visual_algorithm_audio_;
+    std::string helmet_detection_audio_;
+    std::string leak_detection_audio_;
     int play_count_{3};
     std::map<std::string, int> remaining_by_category_;
     uint64_t playback_generation_{0};
